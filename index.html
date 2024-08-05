@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Chat</title>
+  </head>
+  <body>
+    <h1>WebRTC 채팅</h1>
+    <div id="messages"></div>
+    <input id="messageInput" type="text" placeholder="메시지를 입력하세요" />
+    <button id="sendButton" disabled>전송</button>
+  </body>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="./css/main.css" />
+  <script>
+    const socket = io(); // Socket.IO 서버 연결
+    let localConnection;
+    let remoteConnection;
+    let sendChannel;
+    const messagesDiv = document.getElementById("messages");
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendButton");
+
+    async function setupConnection() {
+      localConnection = new RTCPeerConnection();
+      remoteConnection = new RTCPeerConnection();
+
+      // 데이터 채널 생성
+      sendChannel = localConnection.createDataChannel("sendChannel");
+      sendChannel.onopen = () => {
+        console.log("데이터 채널이 열렸습니다.");
+        sendButton.disabled = false; // 버튼 활성화
+      };
+      sendChannel.onclose = () => {
+        console.log("데이터 채널이 닫혔습니다.");
+        sendButton.disabled = true; // 버튼 비활성화
+      };
+      sendChannel.onmessage = (event) => {
+        const messageElement = document.createElement("div");
+        messageElement.className = "message other-message";
+        messageElement.textContent = `상대방: ${event.data}`;
+        messagesDiv.appendChild(messageElement);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight; // 스크롤 내리기
+      };
+
+      localConnection.oniceconnectionstatechange = () => {
+        console.log(
+          `Local ICE Connection State: ${localConnection.iceConnectionState}`
+        );
+      };
+
+      remoteConnection.oniceconnectionstatechange = () => {
+        console.log(
+          `Remote ICE Connection State: ${remoteConnection.iceConnectionState}`
+        );
+      };
+
+      sendChannel.onopen = () => {
+        console.log("데이터 채널이 열렸습니다.");
+        sendButton.disabled = false; // 버튼 활성화
+      };
+
+      sendChannel.onclose = () => {
+        console.log("데이터 채널이 닫혔습니다.");
+        sendButton.disabled = true; // 버튼 비활성화
+      };
+
+      // Offer 생성 및 전송
+      const offer = await localConnection.createOffer();
+      await localConnection.setLocalDescription(offer);
+      socket.emit("signal", { offer });
+    }
+
+    sendButton.addEventListener("click", () => {
+      const message = messageInput.value;
+      console.log("전송할 메시지:", message); // 메시지 로그 출력
+      if (sendChannel.readyState === "open") {
+        sendChannel.send(message);
+        const messageElement = document.createElement("div");
+        messageElement.className = "message my-message";
+        messageElement.textContent = `나: ${message}`;
+        messagesDiv.appendChild(messageElement);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight; // 스크롤 내리기
+        messageInput.value = "";
+      } else {
+        console.error("데이터 채널이 열려 있지 않습니다.");
+      }
+    });
+
+    // 신호 처리
+    socket.on("signal", async (data) => {
+      console.log("신호 수신:", data); // 수신된 신호 로그 출력
+      if (data.offer) {
+        await remoteConnection.setRemoteDescription(
+          new RTCSessionDescription(data.offer)
+        );
+        const answer = await remoteConnection.createAnswer();
+        await remoteConnection.setLocalDescription(answer);
+        socket.emit("signal", { answer });
+      } else if (data.answer) {
+        await localConnection.setRemoteDescription(
+          new RTCSessionDescription(data.answer)
+        );
+      } else if (data.candidate) {
+        const candidate = new RTCIceCandidate(data.candidate);
+        localConnection.addIceCandidate(candidate);
+        remoteConnection.addIceCandidate(candidate);
+      }
+    });
+
+    // DOMContentLoaded 이벤트를 사용하여 연결 설정
+    document.addEventListener("DOMContentLoaded", () => {
+      setupConnection(); // DOM이 로드된 후 연결 설정
+    });
+  </script>
+</html>
